@@ -25,3 +25,4 @@ A static, browser-based practice memory experiment using plain HTML, CSS, and Ja
 
 ## Suggested revision exercise
 After publishing and testing, change the background color in `styles.css` from `#f3f6fa` to `#eaf4f1`, test locally, then upload the revised stylesheet to GitHub and commit it with the message `Improve background contrast`. Confirm the live site changes and still works.
+PSYC 402 Encoding Strategies Memory Experiment — GitHub Pages deployment test.
