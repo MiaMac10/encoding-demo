@@ -82,7 +82,7 @@ function showWord(index){
   screen(`Block ${i+1} · Word ${index+1} of 6`,"");
   content.append(node("div",block.words[index].toUpperCase(),"word"));
   const countdown=node("p",`Next word in ${WORD_SECONDS}s`,"center timer");content.append(countdown);
-  session.trials.push({trial:session.trials.length+1,block:i+1,position:index+1,strategy:block.strategy.id,strategy_name:block.strategy.name,list_id:block.listId,word:block.words[index],duration_seconds:WORD_SECONDS});
+  session.trials.push({trial:session.trials.length+1,block:i+1,position:index+1,strategy:block.strategy.id,strategy_name:block.strategy.name,listId:block.listId,word:block.words[index],duration_seconds:WORD_SECONDS});
   const started=performance.now();
   activeTimer=setInterval(()=>{
     const left=Math.max(0,Math.ceil(WORD_SECONDS-(performance.now()-started)/1000));
