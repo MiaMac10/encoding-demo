@@ -1,6 +1,16 @@
 "use strict";
 
-// Static, local-only PSYC 402 practice experiment. No data are sent anywhere.
+// Team 3, Chain A: instructor-controlled DataPipe upload and credit redirect.
+const TEAM_ID = "3";
+const CHAIN_ID = "A";
+const DATAPIPE_EXPERIMENT_ID = "VDmArf6wLtj5";
+const CREDIT_SURVEY_URL = "https://stlawu.qualtrics.com/jfe/form/SV_dhuzwAkMKUaZetM";
+const incomingParams = new URLSearchParams(window.location.search);
+const sessionId = incomingParams.get("sid");
+const incomingChain = incomingParams.get("chain");
+const validIncomingSession = Boolean(sessionId && /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) && incomingChain === CHAIN_ID);
+let finished = false;
+let saving = false;
 const STRATEGIES = [
   {id:"maintenance", name:"Maintenance rehearsal", instruction:"Repeat each word silently to yourself several times while it is on the screen. Focus on repeating the word rather than thinking about its meaning."},
   {id:"self_reference", name:"Self-reference", instruction:"For each word, think about how it connects to your own life, experiences, or preferences. Make a personal connection while it is on the screen."},
@@ -48,13 +58,14 @@ function welcome(){
   setProgress("Welcome",0);
   screen("How does studying affect memory?","You will study 18 words across three blocks, using a different memory strategy in each block. Each word appears for 4 seconds.");
   const list=document.createElement("ul");
-  ["Read the instructions before each block.","After all 18 words, count backward by 3s for 30 seconds.","Type as many studied words as you remember, in any order.","See your scores and download two CSV data files."].forEach(t=>list.append(node("li",t)));
+  ["Read the instructions before each block.","After all 18 words, count backward by 3s for 30 seconds.","Type as many studied words as you remember, in any order.","After recall, your results will save automatically before you continue to the research-credit survey."].forEach(t=>list.append(node("li",t)));
   content.append(list,node("p","Do not write down the words or use other memory aids. The order of strategies and word lists changes for each new session.","notice"),button("Begin experiment",startSession));
 }
 function startSession(){
+  if (!validIncomingSession || session || finished) return;
   const strategyOrder=shuffle(STRATEGIES);
   const listOrder=shuffle(WORD_LISTS.map((_,i)=>i));
-  session={id:`session-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,started:new Date().toISOString(),blocks:strategyOrder.map((s,i)=>({strategy:s,listId:listOrder[i]+1,words:[...WORD_LISTS[listOrder[i]]]})),trials:[],blockIndex:0,recallRaw:"",recallEntries:[],distractorStart:null,distractorEntries:[],distractorInput:"",completed:null};
+  session={id:sessionId,started:new Date().toISOString(),blocks:strategyOrder.map((s,i)=>({strategy:s,listId:listOrder[i]+1,words:[...WORD_LISTS[listOrder[i]]]})),trials:[],blockIndex:0,recallRaw:"",recallEntries:[],distractorStart:null,distractorEntries:[],distractorInput:"",completed:null};
   blockIntro();
 }
 function blockIntro(){
@@ -113,7 +124,7 @@ function recallScreen(){
   screen("Recall the studied words","Type as many of the 18 studied words as you can remember, from any block and in any order. You may separate words using spaces, commas, or new lines. Do not worry about capitalization.");
   const area=document.createElement("textarea");area.className="field";area.placeholder="Enter remembered words here…";area.setAttribute("aria-label","Remembered words");
   content.append(area,button("Submit recall and see results",()=>{
-    session.recallRaw=area.value;session.recallEntries=parseRecall(area.value);session.completed=new Date().toISOString();showResults();
+    session.recallRaw=area.value;session.recallEntries=parseRecall(area.value);session.completed=new Date().toISOString();finished=true;showResults();void saveAndRedirect();
   }));
 }
 function parseRecall(text){return text.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g)||[];}
@@ -160,25 +171,63 @@ function showResults(){
   }
   content.append(chart);
   const total=matches.size;content.append(node("p",`Total recalled: ${total} / 18 words.`,"notice"));
-  content.append(button("Download summary CSV",()=>downloadCSV("summary",matches)),button("Download trial-level CSV",()=>downloadCSV("trials",matches),true));
-  content.append(node("p","The summary CSV contains one data row for this session. The trial-level CSV contains 18 data rows, one for each studied word. Downloads are stored on your device; this site does not collect them.","muted small"));
-  content.append(button("Start a new randomized session",welcome,true));
+  content.append(node("p","Saving your results securely before continuing…","notice"));
 }
 function csvCell(value){const s=String(value??"");return `"${s.replaceAll('"','""')}"`;}
 function csv(rows){return rows.map(row=>row.map(csvCell).join(",")).join("\r\n")+"\r\n";}
-function downloadCSV(kind,matches){
+function csvPayloads(matches){
   const scores=Object.fromEntries(STRATEGIES.map(s=>[s.id,session.trials.filter(t=>t.strategy===s.id&&matches.has(t.trial)).length]));
-  let rows;
-  if(kind==="summary"){
-    rows=[
-      ["session_id","started_at","completed_at","strategy_order","list_assignment","maintenance_recall","self_reference_recall","imagery_recall","total_recall","distractor_start","distractor_responses","recall_text"],
-      [session.id,session.started,session.completed,session.blocks.map(b=>b.strategy.id).join(" | "),session.blocks.map(b=>`${b.strategy.id}:list${b.listId}`).join(" | "),scores.maintenance,scores.self_reference,scores.imagery,matches.size,session.distractorStart,session.distractorEntries.join(" | "),session.recallRaw]
-    ];
-  }else{
-    rows=[["session_id","trial","block","serial_position","strategy","list_id","studied_word","presentation_seconds","recalled","matched_response"]];
-    for(const t of session.trials)rows.push([session.id,t.trial,t.block,t.position,t.strategy,t.list_id,t.word,t.duration_seconds,matches.has(t.trial)?1:0,matches.get(t.trial)||""]);
-  }
-  const blob=new Blob([csv(rows)],{type:"text/csv;charset=utf-8"});
-  const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=`encoding_${kind}_${session.id}.csv`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const summary=[
+    ["session_id","team_id","chain_id","session_start","session_end","strategy_order","list_assignment","maintenance_recall","self_reference_recall","imagery_recall","total_recall","distractor_start","distractor_responses","recall_text"],
+    [session.id,TEAM_ID,CHAIN_ID,session.started,session.completed,session.blocks.map(b=>b.strategy.id).join(" | "),session.blocks.map(b=>`${b.strategy.id}:list${b.listId}`).join(" | "),scores.maintenance,scores.self_reference,scores.imagery,matches.size,session.distractorStart,session.distractorEntries.join(" | "),session.recallRaw]
+  ];
+  const trials=[["session_id","team_id","chain_id","trial","block","serial_position","strategy","list_id","studied_word","presentation_seconds","recalled","matched_response"]];
+  for(const t of session.trials) trials.push([session.id,TEAM_ID,CHAIN_ID,t.trial,t.block,t.position,t.strategy,t.listId,t.word,t.duration_seconds,matches.has(t.trial)?1:0,matches.get(t.trial)||""]);
+  return [{filename:`summary_${session.id}.csv`,data:csv(summary)},{filename:`trials_${session.id}.csv`,data:csv(trials)}];
 }
-welcome();
+function downloadFile(file){
+  const blob=new Blob([file.data],{type:"text/csv;charset=utf-8"});
+  const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=file.filename;
+  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function sendCsvToDataPipe(file){
+  const response=await fetch("https://pipe.jspsych.org/api/data/",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({experimentID:DATAPIPE_EXPERIMENT_ID,filename:file.filename,data:file.data})
+  });
+  const body=await response.json().catch(()=>({}));
+  if(response.status===201 || response.status===202) return;
+  if(response.status===400 && body.error==="FILE_EXISTS") return;
+  throw new Error(body.error || `HTTP_${response.status}`);
+}
+async function saveAndRedirect(){
+  if(!finished || !session || saving) return;
+  saving=true;
+  const files=csvPayloads(scoreRecall());
+  const status=node("p","Saving your data… Please keep this page open.","notice");
+  content.append(status);
+  try{
+    // Sequential uploads allow a successful first file to be safely retried using FILE_EXISTS.
+    for(const file of files) await sendCsvToDataPipe(file);
+    status.textContent="Your data have been saved. Redirecting to the research-credit survey…";
+    const url=new URL(CREDIT_SURVEY_URL);
+    url.searchParams.set("sid",session.id);
+    url.searchParams.set("chain",CHAIN_ID);
+    url.searchParams.set("source_team",TEAM_ID);
+    window.location.assign(url.toString());
+  }catch(error){
+    status.textContent="Saving failed. Your results have not been confirmed. Please retry before leaving this page.";
+    content.append(node("p",`Technical detail: ${String(error.message || error)}`,"error"));
+    content.append(button("Retry saving",()=>{
+      // Remove old failure controls before another attempt.
+      showResults();void saveAndRedirect();
+    }));
+    content.append(node("p","Backup: download your CSV files if saving continues to fail, and contact your instructor. Downloading does not submit research credit.","muted small"));
+    for(const file of files) content.append(button(`Download ${file.filename.startsWith("summary")?"summary":"trial-level"} CSV`,()=>downloadFile(file),true));
+  }finally{saving=false;}
+}
+function requireChainEntry(){
+  setProgress("Access required",0);
+  screen("Please start from the preceding activity","This is the final activity in Chain A. Open it through Team 2 so your anonymous session ID is carried forward. Do not begin here directly.");
+}
+if(validIncomingSession) welcome(); else requireChainEntry();
